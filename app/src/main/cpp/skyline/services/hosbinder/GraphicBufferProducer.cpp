@@ -5,7 +5,7 @@
 
 #include <android/hardware_buffer.h>
 #include <gpu.h>
-#include <gpu/format.h>
+#include <gpu/texture/format.h>
 #include <soc.h>
 #include <common/settings.h>
 #include <services/nvdrv/driver.h>
@@ -136,10 +136,15 @@ namespace skyline::service::hosbinder {
             // Note: This is used on HOS to signal that the frame number should be returned but it's unimplemented
             throw exception("Any non-identity sticky transform is not supported: '{}' ({:#b})", ToString(stickyTransform), static_cast<u32>(stickyTransform));
 
-        fence.Wait(state.soc->host1x);
-        buffer.texture->SynchronizeHost();
-        state.gpu->presentation.Present(slot);
-        state.gpu->presentation.bufferEvent->Signal();
+        //fence.Wait(state.soc->host1x);
+
+        {
+            std::scoped_lock textureLock(*buffer.texture);
+            buffer.texture->SynchronizeHost();
+            buffer.texture->WaitOnFence();
+            state.gpu->presentation.Present(slot);
+            state.gpu->presentation.bufferEvent->Signal();
+        }
 
         width = defaultWidth;
         height = defaultHeight;
@@ -345,14 +350,14 @@ namespace skyline::service::hosbinder {
 
         gpu::texture::TileMode tileMode;
         gpu::texture::TileConfig tileConfig;
-        if (surface.layout != NvSurfaceLayout::Blocklinear) {
+        if (surface.layout == NvSurfaceLayout::Blocklinear) {
             tileMode = gpu::texture::TileMode::Block;
             tileConfig = {
                 .surfaceWidth = static_cast<u16>(surface.width),
                 .blockHeight = static_cast<u8>(1U << surface.blockHeightLog2),
                 .blockDepth = 1,
             };
-        } else if (surface.layout != NvSurfaceLayout::Pitch) {
+        } else if (surface.layout == NvSurfaceLayout::Pitch) {
             tileMode = gpu::texture::TileMode::Pitch;
             tileConfig = {
                 .pitch = surface.pitch,
